@@ -102,9 +102,11 @@ Respond ONLY with valid JSON in this exact format:
   ]
 }`;
 
-    const userPrompt = bureauData.length > 0 
-      ? `Analyze the following credit report data and identify all discrepancies and opportunities:\n\n${bureauData.join("\n\n---\n\n")}`
-      : `No credit report data was provided. Generate sample discrepancies for demonstration purposes with realistic credit repair scenarios including accounts like "Atlas Credit Co", "Meridian Bank", "Credence Resource Management", "Pinnacle Lending", and "National Auto Finance".`;
+    if (bureauData.length === 0) {
+      throw new Error("No credit report data provided. Please upload at least one credit report.");
+    }
+
+    const userPrompt = `Analyze the following credit report data and identify all discrepancies and opportunities:\n\n${bureauData.join("\n\n---\n\n")}`;
 
     console.log("Calling Lovable AI for credit analysis...");
 
