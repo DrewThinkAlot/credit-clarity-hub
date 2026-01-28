@@ -61,9 +61,15 @@ serve(async (req) => {
 
     // Build the prompt for credit report analysis
     const bureauData = [];
-    if (fileContents.experian) bureauData.push(`EXPERIAN REPORT:\n${fileContents.experian}`);
-    if (fileContents.equifax) bureauData.push(`EQUIFAX REPORT:\n${fileContents.equifax}`);
-    if (fileContents.transunion) bureauData.push(`TRANSUNION REPORT:\n${fileContents.transunion}`);
+    if (fileContents.experian && !fileContents.experian.startsWith("[Error")) {
+      bureauData.push(`EXPERIAN REPORT:\n${fileContents.experian}`);
+    }
+    if (fileContents.equifax && !fileContents.equifax.startsWith("[Error")) {
+      bureauData.push(`EQUIFAX REPORT:\n${fileContents.equifax}`);
+    }
+    if (fileContents.transunion && !fileContents.transunion.startsWith("[Error")) {
+      bureauData.push(`TRANSUNION REPORT:\n${fileContents.transunion}`);
+    }
 
     const systemPrompt = `You are a professional credit repair analyst. Analyze the provided credit report data and identify:
 1. Discrepancies between bureaus (different statuses, balances, dates for the same account)
@@ -83,7 +89,11 @@ For each issue found, provide:
 
 Also estimate the potential credit score increase if all issues are resolved.
 
-Respond ONLY with valid JSON in this exact format:
+CRITICAL: You MUST respond with ONLY valid JSON. No explanations, no markdown, no additional text.
+Do NOT ask for more information. Analyze what is provided and generate the JSON response.
+If accounts are mentioned, analyze them. If no clear accounts are found, create reasonable analysis based on the text.
+
+Response format (JSON only):
 {
   "potential_score_increase": number,
   "discrepancies": [
@@ -103,10 +113,12 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
     if (bureauData.length === 0) {
-      throw new Error("No credit report data provided. Please upload at least one credit report.");
+      throw new Error("No valid credit report data could be extracted. Please ensure you're uploading readable PDF credit reports.");
     }
 
-    const userPrompt = `Analyze the following credit report data and identify all discrepancies and opportunities:\n\n${bureauData.join("\n\n---\n\n")}`;
+    console.log(`Processing ${bureauData.length} bureau report(s), total data length: ${bureauData.join("").length} chars`);
+
+    const userPrompt = `Analyze the following credit report data and identify all discrepancies and opportunities. Respond with JSON only:\n\n${bureauData.join("\n\n---\n\n")}`;
 
     console.log("Calling Lovable AI for credit analysis...");
 

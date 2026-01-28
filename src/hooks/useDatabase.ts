@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Report, Discrepancy, Letter, UploadedFile, AnalysisResult, GenerateLetterResult } from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { extractTextFromPDF } from "@/lib/pdfParser";
 
 // Reports hooks
 export function useReports() {
@@ -203,18 +204,21 @@ export function useCreateReport() {
         })
         .eq("id", report.id);
 
-      // Extract text from PDFs (simplified - in production you'd use a PDF parsing library)
+      // Extract text from PDFs using pdfjs-dist
       const fileContents: Record<string, string> = {};
       
       for (const uploadedFile of files) {
         if (uploadedFile.bureau === "unknown") continue;
         
         try {
-          // For demo purposes, we'll pass basic file info
-          // In production, you'd parse the PDF content here
-          fileContents[uploadedFile.bureau] = `[Credit report from ${uploadedFile.bureau} - ${uploadedFile.file.name}]`;
+          console.log(`Parsing PDF for ${uploadedFile.bureau}...`);
+          const textContent = await extractTextFromPDF(uploadedFile.file);
+          fileContents[uploadedFile.bureau] = textContent;
+          console.log(`Extracted ${textContent.length} characters from ${uploadedFile.bureau} report`);
         } catch (e) {
-          console.error("Error reading file:", e);
+          console.error(`Error parsing ${uploadedFile.bureau} PDF:`, e);
+          // Include error info so AI knows this file couldn't be parsed
+          fileContents[uploadedFile.bureau] = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
         }
       }
 
