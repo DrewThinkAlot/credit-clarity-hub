@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, FileCheck, X, Shield, AlertCircle } from "lucide-react";
+import { Upload, FileCheck, X, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { UploadedFile } from "@/types/database";
 
 // Bureau icons as simple components
 const ExperianIcon = () => (
@@ -32,11 +33,6 @@ const TransUnionIcon = () => (
     <span className="text-xs text-muted-foreground">TransUnion</span>
   </div>
 );
-
-interface UploadedFile {
-  file: File;
-  bureau: "experian" | "equifax" | "transunion" | "unknown";
-}
 
 interface FileDropzoneProps {
   onFilesChange: (files: UploadedFile[]) => void;

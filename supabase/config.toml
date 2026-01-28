@@ -1,1 +1,7 @@
 project_id = "vukadvhmhvfmfamelpbn"
+
+[functions.analyze-report]
+verify_jwt = false
+
+[functions.generate-letter]
+verify_jwt = false

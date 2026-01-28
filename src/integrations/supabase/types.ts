@@ -14,7 +14,200 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      discrepancies: {
+        Row: {
+          account_name: string
+          amount: number | null
+          created_at: string
+          discrepancy_type: string | null
+          equifax_status: string | null
+          experian_status: string | null
+          has_conflict: boolean | null
+          id: string
+          recommended_action: string | null
+          report_id: string
+          resolved: boolean | null
+          severity: string | null
+          success_probability: number | null
+          transunion_status: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_name: string
+          amount?: number | null
+          created_at?: string
+          discrepancy_type?: string | null
+          equifax_status?: string | null
+          experian_status?: string | null
+          has_conflict?: boolean | null
+          id?: string
+          recommended_action?: string | null
+          report_id: string
+          resolved?: boolean | null
+          severity?: string | null
+          success_probability?: number | null
+          transunion_status?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_name?: string
+          amount?: number | null
+          created_at?: string
+          discrepancy_type?: string | null
+          equifax_status?: string | null
+          experian_status?: string | null
+          has_conflict?: boolean | null
+          id?: string
+          recommended_action?: string | null
+          report_id?: string
+          resolved?: boolean | null
+          severity?: string | null
+          success_probability?: number | null
+          transunion_status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discrepancies_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      letters: {
+        Row: {
+          account_name: string | null
+          bureau: string
+          content: string
+          created_at: string
+          discrepancy_id: string | null
+          id: string
+          report_id: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_name?: string | null
+          bureau: string
+          content: string
+          created_at?: string
+          discrepancy_id?: string | null
+          id?: string
+          report_id?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_name?: string | null
+          bureau?: string
+          content?: string
+          created_at?: string
+          discrepancy_id?: string | null
+          id?: string
+          report_id?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "letters_discrepancy_id_fkey"
+            columns: ["discrepancy_id"]
+            isOneToOne: false
+            referencedRelation: "discrepancies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "letters_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      reports: {
+        Row: {
+          created_at: string
+          equifax_file_path: string | null
+          experian_file_path: string | null
+          id: string
+          potential_score_increase: number | null
+          raw_analysis: Json | null
+          status: string
+          total_discrepancies: number | null
+          total_letters: number | null
+          transunion_file_path: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          equifax_file_path?: string | null
+          experian_file_path?: string | null
+          id?: string
+          potential_score_increase?: number | null
+          raw_analysis?: Json | null
+          status?: string
+          total_discrepancies?: number | null
+          total_letters?: number | null
+          transunion_file_path?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          equifax_file_path?: string | null
+          experian_file_path?: string | null
+          id?: string
+          potential_score_increase?: number | null
+          raw_analysis?: Json | null
+          status?: string
+          total_discrepancies?: number | null
+          total_letters?: number | null
+          transunion_file_path?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
