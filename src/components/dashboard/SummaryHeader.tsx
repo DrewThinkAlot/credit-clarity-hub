@@ -14,18 +14,17 @@ interface SummaryHeaderProps {
   onExportReport?: () => void;
 }
 
-// Mock data for Phase 1
-const DEFAULT_STATS: SummaryStats = {
-  potentialScoreIncrease: 45,
-  discrepanciesFound: 4,
-  lettersToGenerate: 5,
-};
-
-export function SummaryHeader({ stats = DEFAULT_STATS, onExportReport }: SummaryHeaderProps) {
+export function SummaryHeader({ stats, onExportReport }: SummaryHeaderProps) {
+  // Show zeros if no stats provided
+  const displayStats = stats ?? {
+    potentialScoreIncrease: 0,
+    discrepanciesFound: 0,
+    lettersToGenerate: 0,
+  };
   const statCards = [
     {
       label: "Score Potential",
-      value: `+${stats.potentialScoreIncrease}`,
+      value: `+${displayStats.potentialScoreIncrease}`,
       suffix: "Points",
       icon: TrendingUp,
       color: "primary",
@@ -33,7 +32,7 @@ export function SummaryHeader({ stats = DEFAULT_STATS, onExportReport }: Summary
     },
     {
       label: "Discrepancies",
-      value: stats.discrepanciesFound,
+      value: displayStats.discrepanciesFound,
       suffix: "Found",
       icon: AlertTriangle,
       color: "warning",
@@ -41,7 +40,7 @@ export function SummaryHeader({ stats = DEFAULT_STATS, onExportReport }: Summary
     },
     {
       label: "Dispute Letters",
-      value: stats.lettersToGenerate,
+      value: displayStats.lettersToGenerate,
       suffix: "Ready",
       icon: FileText,
       color: "cyan",
@@ -60,7 +59,7 @@ export function SummaryHeader({ stats = DEFAULT_STATS, onExportReport }: Summary
           </div>
           <h1 className="text-3xl md:text-4xl font-bold">
             Credit Score Potential:{" "}
-            <span className="gradient-text">+{stats.potentialScoreIncrease} Points</span>
+            <span className="gradient-text">+{displayStats.potentialScoreIncrease} Points</span>
           </h1>
           <p className="text-muted-foreground mt-2 max-w-xl">
             We've analyzed your credit reports and identified opportunities to improve your score. 
