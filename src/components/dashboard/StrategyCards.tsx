@@ -1,4 +1,4 @@
-import { FileText, DollarSign, Search, ArrowRight, TrendingUp, Shield, Zap } from "lucide-react";
+import { FileText, DollarSign, Search, ArrowRight, TrendingUp, Zap, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,54 +14,6 @@ interface StrategyCard {
   priority: "high" | "medium" | "low";
   accountName?: string;
 }
-
-// Mock data for Phase 1
-const MOCK_STRATEGIES: StrategyCard[] = [
-  {
-    id: "1",
-    type: "dispute",
-    title: "Dispute Atlas Account",
-    description: "Inaccurate status reporting across bureaus. High likelihood of removal.",
-    successProbability: 87,
-    priority: "high",
-    accountName: "Atlas Credit Co",
-  },
-  {
-    id: "2",
-    type: "dispute",
-    title: "Dispute Balance Discrepancy",
-    description: "TransUnion reporting $650 higher balance than other bureaus.",
-    successProbability: 92,
-    priority: "high",
-    accountName: "Meridian Bank",
-  },
-  {
-    id: "3",
-    type: "pay-for-delete",
-    title: "Pay for Delete Opportunity",
-    description: "3 small collection accounts under $100. Negotiate removal upon payment.",
-    amount: 287,
-    priority: "medium",
-  },
-  {
-    id: "4",
-    type: "validation",
-    title: "Request Debt Validation",
-    description: "Collection account missing required documentation. Request proof of debt.",
-    successProbability: 65,
-    priority: "medium",
-    accountName: "Credence Resource",
-  },
-  {
-    id: "5",
-    type: "dispute",
-    title: "Dispute Late Payment",
-    description: "Equifax showing 30-day late while others show current. Easy win.",
-    successProbability: 94,
-    priority: "high",
-    accountName: "Pinnacle Lending",
-  },
-];
 
 const typeConfig = {
   dispute: {
@@ -93,9 +45,18 @@ const typeConfig = {
 interface StrategyCardsProps {
   strategies?: StrategyCard[];
   onGenerateLetter?: (strategyId: string) => void;
+  isGenerating?: boolean;
 }
 
-export function StrategyCards({ strategies = MOCK_STRATEGIES, onGenerateLetter }: StrategyCardsProps) {
+export function StrategyCards({ strategies = [], onGenerateLetter, isGenerating }: StrategyCardsProps) {
+  if (strategies.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">No strategies available yet.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -113,7 +74,7 @@ export function StrategyCards({ strategies = MOCK_STRATEGIES, onGenerateLetter }
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {strategies.map((strategy) => {
-          const config = typeConfig[strategy.type];
+          const config = typeConfig[strategy.type] || typeConfig.dispute;
           const Icon = config.icon;
 
           return (
@@ -189,8 +150,13 @@ export function StrategyCards({ strategies = MOCK_STRATEGIES, onGenerateLetter }
                   variant="secondary"
                   size="sm"
                   onClick={() => onGenerateLetter?.(strategy.id)}
+                  disabled={isGenerating}
                 >
-                  <FileText className="w-4 h-4 mr-2" />
+                  {isGenerating ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileText className="w-4 h-4 mr-2" />
+                  )}
                   Generate Letter
                   <ArrowRight className="w-4 h-4 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Button>

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle, XCircle, MinusCircle } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -21,67 +21,21 @@ interface Discrepancy {
   severity: "high" | "medium" | "low";
 }
 
-// Mock data for Phase 1
-const MOCK_DISCREPANCIES: Discrepancy[] = [
-  {
-    id: "1",
-    accountName: "Atlas Credit Co",
-    equifaxStatus: "Open",
-    experianStatus: "Closed",
-    transUnionStatus: "Open",
-    hasConflict: true,
-    recommendedAction: "Dispute inaccurate status",
-    severity: "high",
-  },
-  {
-    id: "2",
-    accountName: "Meridian Bank",
-    equifaxStatus: "$2,450",
-    experianStatus: "$2,450",
-    transUnionStatus: "$3,100",
-    hasConflict: true,
-    recommendedAction: "Dispute balance discrepancy",
-    severity: "high",
-  },
-  {
-    id: "3",
-    accountName: "Credence Resource",
-    equifaxStatus: "Collection",
-    experianStatus: "Not Listed",
-    transUnionStatus: "Collection",
-    hasConflict: true,
-    recommendedAction: "Request debt validation",
-    severity: "medium",
-  },
-  {
-    id: "4",
-    accountName: "Pinnacle Lending",
-    equifaxStatus: "30 Days Late",
-    experianStatus: "Current",
-    transUnionStatus: "Current",
-    hasConflict: true,
-    recommendedAction: "Dispute late payment",
-    severity: "medium",
-  },
-  {
-    id: "5",
-    accountName: "National Auto",
-    equifaxStatus: "Closed",
-    experianStatus: "Closed",
-    transUnionStatus: "Closed",
-    hasConflict: false,
-    recommendedAction: "No action needed",
-    severity: "low",
-  },
-];
-
 interface DiscrepancyMatrixProps {
   discrepancies?: Discrepancy[];
 }
 
-export function DiscrepancyMatrix({ discrepancies = MOCK_DISCREPANCIES }: DiscrepancyMatrixProps) {
+export function DiscrepancyMatrix({ discrepancies = [] }: DiscrepancyMatrixProps) {
+  if (discrepancies.length === 0) {
+    return (
+      <div className="glass-card rounded-xl p-12 text-center">
+        <p className="text-muted-foreground">No discrepancies to display.</p>
+      </div>
+    );
+  }
+
   const StatusCell = ({ status, hasConflict }: { status: string; hasConflict: boolean }) => {
-    const isNegative = status.toLowerCase().includes("late") || 
+    const isNegative = status.toLowerCase().includes("late") ||
                        status.toLowerCase().includes("collection") ||
                        status === "Not Listed";
     

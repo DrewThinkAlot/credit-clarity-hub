@@ -5,11 +5,9 @@ import { FileDropzone } from "@/components/upload/FileDropzone";
 import { ProcessingAnimation } from "@/components/upload/ProcessingAnimation";
 import { Button } from "@/components/ui/button";
 import { Sparkles, ArrowRight } from "lucide-react";
-
-interface UploadedFile {
-  file: File;
-  bureau: "experian" | "equifax" | "transunion" | "unknown";
-}
+import { useCreateReport } from "@/hooks/useDatabase";
+import { UploadedFile } from "@/types/database";
+import { useToast } from "@/hooks/use-toast";
 
 type UploadState = "upload" | "processing" | "complete";
 
@@ -17,17 +15,40 @@ export default function Upload() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [state, setState] = useState<UploadState>("upload");
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const createReport = useCreateReport();
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     setState("processing");
+    
+    try {
+      const result = await createReport.mutateAsync(files);
+      
+      if (result.success) {
+        toast({
+          title: "Analysis Complete",
+          description: `Found ${result.discrepancies_count} potential issues. Estimated score improvement: +${result.potential_score_increase} points.`,
+        });
+        setState("complete");
+        // Navigate to dashboard after a brief delay
+        setTimeout(() => {
+          navigate("/");
+        }, 500);
+      } else {
+        throw new Error(result.error || "Analysis failed");
+      }
+    } catch (error) {
+      setState("upload");
+      toast({
+        title: "Analysis Failed",
+        description: error instanceof Error ? error.message : "An error occurred during analysis",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleProcessingComplete = () => {
-    setState("complete");
-    // Navigate to dashboard after a brief delay
-    setTimeout(() => {
-      navigate("/");
-    }, 500);
+    // This is now handled by the mutation
   };
 
   return (
@@ -55,11 +76,11 @@ export default function Upload() {
                 <Button
                   size="lg"
                   className="w-full py-6 text-lg font-medium glow-md disabled:opacity-50 disabled:glow-none"
-                  disabled={files.length === 0}
+                  disabled={files.length === 0 || createReport.isPending}
                   onClick={handleAnalyze}
                 >
                   <Sparkles className="w-5 h-5 mr-2" />
-                  Analyze My Credit
+                  {createReport.isPending ? "Analyzing..." : "Analyze My Credit"}
                   <ArrowRight className="w-5 h-5 ml-2" />
                 </Button>
                 {files.length === 0 && (
