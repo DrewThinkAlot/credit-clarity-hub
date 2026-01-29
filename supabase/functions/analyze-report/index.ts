@@ -2,6 +2,15 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 
+// PDF.js tries to load a worker by default; workers are not available in this runtime.
+// We force worker-less mode and provide a workerSrc to satisfy internal checks.
+// (The workerSrc is not actually fetched when disableWorker=true, but PDF.js still requires it.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(pdfjsLib as any).GlobalWorkerOptions = (pdfjsLib as any).GlobalWorkerOptions || {};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(pdfjsLib as any).GlobalWorkerOptions.workerSrc =
+  "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -65,11 +74,14 @@ async function extractTextWithPDFJS(buffer: Uint8Array): Promise<string> {
   console.log("Attempting PDF.js extraction...");
   
   try {
-    const loadingTask = pdfjsLib.getDocument({ 
+    const loadingTask = pdfjsLib.getDocument({
       data: buffer,
+      // Edge runtime: run without worker
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      disableWorker: true as any,
       useSystemFonts: true,
       disableFontFace: true,
-    });
+    } as any);
     
     const pdf = await loadingTask.promise;
     console.log(`PDF loaded successfully, pages: ${pdf.numPages}`);
