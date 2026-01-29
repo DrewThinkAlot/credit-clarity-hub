@@ -17,13 +17,17 @@ export type Database = {
       discrepancies: {
         Row: {
           account_name: string
+          account_number_partial: string | null
           amount: number | null
           created_at: string
+          date_of_first_delinquency: string | null
           discrepancy_type: string | null
           equifax_status: string | null
           experian_status: string | null
+          fcra_section: string | null
           has_conflict: boolean | null
           id: string
+          priority_rank: number | null
           recommended_action: string | null
           report_id: string
           resolved: boolean | null
@@ -32,16 +36,21 @@ export type Database = {
           transunion_status: string | null
           updated_at: string
           user_id: string
+          violation_type: string | null
         }
         Insert: {
           account_name: string
+          account_number_partial?: string | null
           amount?: number | null
           created_at?: string
+          date_of_first_delinquency?: string | null
           discrepancy_type?: string | null
           equifax_status?: string | null
           experian_status?: string | null
+          fcra_section?: string | null
           has_conflict?: boolean | null
           id?: string
+          priority_rank?: number | null
           recommended_action?: string | null
           report_id: string
           resolved?: boolean | null
@@ -50,16 +59,21 @@ export type Database = {
           transunion_status?: string | null
           updated_at?: string
           user_id: string
+          violation_type?: string | null
         }
         Update: {
           account_name?: string
+          account_number_partial?: string | null
           amount?: number | null
           created_at?: string
+          date_of_first_delinquency?: string | null
           discrepancy_type?: string | null
           equifax_status?: string | null
           experian_status?: string | null
+          fcra_section?: string | null
           has_conflict?: boolean | null
           id?: string
+          priority_rank?: number | null
           recommended_action?: string | null
           report_id?: string
           resolved?: boolean | null
@@ -68,6 +82,7 @@ export type Database = {
           transunion_status?: string | null
           updated_at?: string
           user_id?: string
+          violation_type?: string | null
         }
         Relationships: [
           {
