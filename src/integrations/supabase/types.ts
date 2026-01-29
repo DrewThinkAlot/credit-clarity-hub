@@ -88,6 +88,10 @@ export type Database = {
           discrepancy_id: string | null
           id: string
           report_id: string | null
+          resolution_status: string | null
+          response_content: string | null
+          response_due_date: string | null
+          sent_date: string | null
           status: string
           title: string
           updated_at: string
@@ -101,6 +105,10 @@ export type Database = {
           discrepancy_id?: string | null
           id?: string
           report_id?: string | null
+          resolution_status?: string | null
+          response_content?: string | null
+          response_due_date?: string | null
+          sent_date?: string | null
           status?: string
           title: string
           updated_at?: string
@@ -114,6 +122,10 @@ export type Database = {
           discrepancy_id?: string | null
           id?: string
           report_id?: string | null
+          resolution_status?: string | null
+          response_content?: string | null
+          response_due_date?: string | null
+          sent_date?: string | null
           status?: string
           title?: string
           updated_at?: string
@@ -138,26 +150,44 @@ export type Database = {
       }
       profiles: {
         Row: {
+          address: string | null
           created_at: string
           email: string | null
           full_name: string | null
           id: string
+          notification_analysis_complete: boolean | null
+          notification_email_enabled: boolean | null
+          notification_response_received: boolean | null
+          phone: string | null
+          ssn_last_four: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          address?: string | null
           created_at?: string
           email?: string | null
           full_name?: string | null
           id?: string
+          notification_analysis_complete?: boolean | null
+          notification_email_enabled?: boolean | null
+          notification_response_received?: boolean | null
+          phone?: string | null
+          ssn_last_four?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          address?: string | null
           created_at?: string
           email?: string | null
           full_name?: string | null
           id?: string
+          notification_analysis_complete?: boolean | null
+          notification_email_enabled?: boolean | null
+          notification_response_received?: boolean | null
+          phone?: string | null
+          ssn_last_four?: string | null
           updated_at?: string
           user_id?: string
         }

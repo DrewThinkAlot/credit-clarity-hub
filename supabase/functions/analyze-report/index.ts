@@ -8,11 +8,121 @@ const corsHeaders = {
 
 interface AnalysisRequest {
   reportId: string;
-  fileContents: {
-    experian?: string;
+  files: {
+    experian?: string; // base64 encoded PDF
     equifax?: string;
     transunion?: string;
   };
+}
+
+// Simple text extraction from PDF using regex patterns for common credit report formats
+function extractTextFromPDFBuffer(buffer: Uint8Array): string {
+  // Convert buffer to string to extract readable text
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let text = decoder.decode(buffer);
+  
+  // Extract text between stream and endstream markers (PDF text streams)
+  const streamMatches = text.match(/stream\s*([\s\S]*?)\s*endstream/g) || [];
+  const extractedTexts: string[] = [];
+  
+  for (const match of streamMatches) {
+    // Try to extract readable text from streams
+    const content = match.replace(/stream\s*/, "").replace(/\s*endstream/, "");
+    // Look for text within parentheses (common PDF text format) and extract
+    const textMatches = content.match(/\(([^)]+)\)/g) || [];
+    for (const textMatch of textMatches) {
+      const cleanText = textMatch.slice(1, -1); // Remove parentheses
+      if (cleanText.length > 1 && /[a-zA-Z0-9]/.test(cleanText)) {
+        extractedTexts.push(cleanText);
+      }
+    }
+  }
+  
+  // Also try to find literal strings in the PDF
+  const literalMatches = text.match(/\/T\s*\(([^)]+)\)/g) || [];
+  for (const match of literalMatches) {
+    const cleanText = match.replace(/\/T\s*\(/, "").replace(/\)$/, "");
+    if (cleanText.length > 1) {
+      extractedTexts.push(cleanText);
+    }
+  }
+  
+  // Try BT...ET text blocks
+  const btMatches = text.match(/BT\s*([\s\S]*?)\s*ET/g) || [];
+  for (const match of btMatches) {
+    const tjMatches = match.match(/\[([^\]]+)\]\s*TJ/g) || [];
+    for (const tj of tjMatches) {
+      const parts = tj.match(/\(([^)]+)\)/g) || [];
+      for (const part of parts) {
+        const cleanText = part.slice(1, -1);
+        if (cleanText.length > 0 && /[a-zA-Z0-9]/.test(cleanText)) {
+          extractedTexts.push(cleanText);
+        }
+      }
+    }
+  }
+  
+  // Combine extracted text
+  let result = extractedTexts.join(" ").replace(/\s+/g, " ").trim();
+  
+  // If we couldn't extract much text, return a message indicating the PDF format
+  if (result.length < 100) {
+    // Try to extract any visible ASCII text from the buffer
+    const asciiText = Array.from(buffer)
+      .filter(b => (b >= 32 && b <= 126) || b === 10 || b === 13)
+      .map(b => String.fromCharCode(b))
+      .join("");
+    
+    // Look for account-related keywords and surrounding text
+    const keywords = ["account", "balance", "payment", "collection", "experian", "equifax", "transunion", "credit", "inquiry", "late"];
+    const lines = asciiText.split(/[\n\r]+/);
+    const relevantLines: string[] = [];
+    
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      if (keywords.some(k => lowerLine.includes(k)) && line.trim().length > 5) {
+        relevantLines.push(line.trim());
+      }
+    }
+    
+    if (relevantLines.length > 0) {
+      result = relevantLines.join("\n");
+    }
+  }
+  
+  // Truncate to avoid token limits
+  if (result.length > 15000) {
+    result = result.substring(0, 15000) + "\n[... content truncated for analysis ...]";
+  }
+  
+  return result;
+}
+
+async function extractTextFromBase64PDF(base64Data: string): Promise<string> {
+  try {
+    // Remove data URL prefix if present
+    const base64Clean = base64Data.replace(/^data:application\/pdf;base64,/, "");
+    
+    // Decode base64 to Uint8Array
+    const binaryString = atob(base64Clean);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Extract text from PDF buffer
+    const text = extractTextFromPDFBuffer(bytes);
+    
+    if (text.length < 50) {
+      console.log("Limited text extraction from PDF, file may be image-based or encrypted");
+      return "[PDF content could not be fully extracted - file may be image-based or protected]";
+    }
+    
+    return text;
+  } catch (error) {
+    console.error("PDF extraction error:", error);
+    throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : "Unknown error"}`);
+  }
 }
 
 serve(async (req) => {
@@ -46,7 +156,7 @@ serve(async (req) => {
       throw new Error("Unauthorized");
     }
 
-    const { reportId, fileContents }: AnalysisRequest = await req.json();
+    const { reportId, files }: AnalysisRequest = await req.json();
 
     if (!reportId) {
       throw new Error("Report ID is required");
@@ -58,6 +168,41 @@ serve(async (req) => {
       .update({ status: "processing" })
       .eq("id", reportId)
       .eq("user_id", user.id);
+
+    // Parse PDFs server-side
+    const fileContents: Record<string, string> = {};
+    
+    console.log("Parsing uploaded PDFs...");
+    
+    if (files.experian) {
+      try {
+        fileContents.experian = await extractTextFromBase64PDF(files.experian);
+        console.log(`Parsed Experian PDF: ${fileContents.experian.length} chars`);
+      } catch (e) {
+        console.error("Failed to parse Experian PDF:", e);
+        fileContents.experian = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
+      }
+    }
+    
+    if (files.equifax) {
+      try {
+        fileContents.equifax = await extractTextFromBase64PDF(files.equifax);
+        console.log(`Parsed Equifax PDF: ${fileContents.equifax.length} chars`);
+      } catch (e) {
+        console.error("Failed to parse Equifax PDF:", e);
+        fileContents.equifax = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
+      }
+    }
+    
+    if (files.transunion) {
+      try {
+        fileContents.transunion = await extractTextFromBase64PDF(files.transunion);
+        console.log(`Parsed TransUnion PDF: ${fileContents.transunion.length} chars`);
+      } catch (e) {
+        console.error("Failed to parse TransUnion PDF:", e);
+        fileContents.transunion = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
+      }
+    }
 
     // Build the prompt for credit report analysis
     const bureauData = [];
