@@ -363,26 +363,37 @@ Response format:
     // Store discrepancies in the database
     const discrepancies = analysisResult.discrepancies || [];
     
+    // Helper to safely convert values, handling string "null" from AI
+    const safeValue = (val: any) => (val === null || val === undefined || val === "null" || val === "") ? null : val;
+    const safeDateValue = (val: any) => {
+      if (val === null || val === undefined || val === "null" || val === "") return null;
+      // Validate it's a proper date format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      return dateRegex.test(val) ? val : null;
+    };
+
     if (discrepancies.length > 0) {
       const discrepancyRecords = discrepancies.map((d: any) => ({
         report_id: reportId,
         user_id: user.id,
-        account_name: d.account_name,
-        account_number_partial: d.account_number_partial || null,
-        equifax_status: d.equifax_status,
-        experian_status: d.experian_status,
-        transunion_status: d.transunion_status,
-        has_conflict: d.has_conflict,
-        violation_type: d.violation_type || null,
-        fcra_section: d.fcra_section || null,
-        severity: d.severity,
-        priority_rank: d.priority_rank || null,
-        recommended_action: d.recommended_action,
-        discrepancy_type: d.discrepancy_type,
-        success_probability: d.success_probability,
-        amount: d.amount,
-        date_of_first_delinquency: d.date_of_first_delinquency || null,
+        account_name: d.account_name || "Unknown Account",
+        account_number_partial: safeValue(d.account_number_partial),
+        equifax_status: safeValue(d.equifax_status),
+        experian_status: safeValue(d.experian_status),
+        transunion_status: safeValue(d.transunion_status),
+        has_conflict: d.has_conflict ?? false,
+        violation_type: safeValue(d.violation_type),
+        fcra_section: safeValue(d.fcra_section),
+        severity: d.severity || "medium",
+        priority_rank: typeof d.priority_rank === "number" ? d.priority_rank : null,
+        recommended_action: safeValue(d.recommended_action),
+        discrepancy_type: safeValue(d.discrepancy_type),
+        success_probability: typeof d.success_probability === "number" ? d.success_probability : null,
+        amount: typeof d.amount === "number" ? d.amount : null,
+        date_of_first_delinquency: safeDateValue(d.date_of_first_delinquency),
       }));
+
+      console.log("Inserting discrepancies:", JSON.stringify(discrepancyRecords, null, 2));
 
       const { error: discError } = await supabase
         .from("discrepancies")
