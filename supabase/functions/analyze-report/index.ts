@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,36 +10,124 @@ const corsHeaders = {
 interface AnalysisRequest {
   reportId: string;
   files: {
-    experian?: string; // base64 encoded PDF
+    experian?: string;
     equifax?: string;
     transunion?: string;
   };
 }
 
-// Simple text extraction from PDF using regex patterns for common credit report formats
-function extractTextFromPDFBuffer(buffer: Uint8Array): string {
-  // Convert buffer to string to extract readable text
+// Clean extracted text to improve AI analysis quality
+function cleanCreditReportText(rawText: string): string {
+  let text = rawText;
+  
+  // Normalize whitespace while preserving some structure
+  text = text.replace(/\s+/g, " ");
+  
+  // Add line breaks before common credit report section headers
+  const sectionHeaders = [
+    /(?=Account\s+(?:Name|Number|Status|Type))/gi,
+    /(?=Payment\s+History)/gi,
+    /(?=Balance\s+Information)/gi,
+    /(?=Credit\s+Limit)/gi,
+    /(?=Date\s+Opened)/gi,
+    /(?=Last\s+(?:Payment|Activity))/gi,
+    /(?=Account\s+Details)/gi,
+    /(?=CREDIT\s+(?:ACCOUNTS|CARDS|HISTORY))/gi,
+    /(?=COLLECTIONS)/gi,
+    /(?=PUBLIC\s+RECORDS)/gi,
+    /(?=INQUIRIES)/gi,
+  ];
+  
+  for (const pattern of sectionHeaders) {
+    text = text.replace(pattern, "\n");
+  }
+  
+  // Preserve delinquency status visibility
+  text = text.replace(/(\d+\s+days?\s+(?:late|past due|delinquent))/gi, "\n$1");
+  
+  // Remove common footer/header noise
+  text = text.replace(/Page \d+ of \d+/gi, "");
+  text = text.replace(/000000001-DISC/g, "");
+  text = text.replace(/TransUnion Interactive/gi, "TransUnion");
+  text = text.replace(/Experian Consumer Services/gi, "Experian");
+  
+  // Highlight collection accounts
+  text = text.replace(/(Collection|Charge[\s-]?off|Charged Off)/gi, "\n[NEGATIVE] $1");
+  
+  // Clean up multiple newlines
+  text = text.replace(/\n+/g, "\n");
+  
+  return text.trim();
+}
+
+// Extract text using PDF.js library (handles FlateDecode compression)
+async function extractTextWithPDFJS(buffer: Uint8Array): Promise<string> {
+  console.log("Attempting PDF.js extraction...");
+  
+  try {
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: buffer,
+      useSystemFonts: true,
+      disableFontFace: true,
+    });
+    
+    const pdf = await loadingTask.promise;
+    console.log(`PDF loaded successfully, pages: ${pdf.numPages}`);
+    
+    let fullText = "";
+    const maxPages = Math.min(pdf.numPages, 50); // Limit to first 50 pages
+    
+    for (let i = 1; i <= maxPages; i++) {
+      try {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        
+        // Join text items with spaces, preserving some structure
+        const pageText = textContent.items
+          .map((item: any) => {
+            const str = item.str || "";
+            // Add newline for items that appear to be on different lines
+            if (item.hasEOL) return str + "\n";
+            return str;
+          })
+          .join(" ");
+        
+        fullText += pageText + "\n\n";
+      } catch (pageError) {
+        console.log(`Error extracting page ${i}:`, pageError);
+        continue;
+      }
+    }
+    
+    console.log(`PDF.js extracted ${fullText.length} characters from ${maxPages} pages`);
+    return fullText;
+  } catch (error) {
+    console.error("PDF.js extraction error:", error);
+    throw error;
+  }
+}
+
+// Fallback: Basic regex-based extraction for older/simpler PDFs
+function extractTextFromPDFBufferFallback(buffer: Uint8Array): string {
+  console.log("Using fallback regex extraction...");
+  
   const decoder = new TextDecoder("utf-8", { fatal: false });
   let text = decoder.decode(buffer);
   
-  // Extract text between stream and endstream markers (PDF text streams)
   const streamMatches = text.match(/stream\s*([\s\S]*?)\s*endstream/g) || [];
   const extractedTexts: string[] = [];
   
   for (const match of streamMatches) {
-    // Try to extract readable text from streams
     const content = match.replace(/stream\s*/, "").replace(/\s*endstream/, "");
-    // Look for text within parentheses (common PDF text format) and extract
     const textMatches = content.match(/\(([^)]+)\)/g) || [];
     for (const textMatch of textMatches) {
-      const cleanText = textMatch.slice(1, -1); // Remove parentheses
+      const cleanText = textMatch.slice(1, -1);
       if (cleanText.length > 1 && /[a-zA-Z0-9]/.test(cleanText)) {
         extractedTexts.push(cleanText);
       }
     }
   }
   
-  // Also try to find literal strings in the PDF
   const literalMatches = text.match(/\/T\s*\(([^)]+)\)/g) || [];
   for (const match of literalMatches) {
     const cleanText = match.replace(/\/T\s*\(/, "").replace(/\)$/, "");
@@ -47,7 +136,6 @@ function extractTextFromPDFBuffer(buffer: Uint8Array): string {
     }
   }
   
-  // Try BT...ET text blocks
   const btMatches = text.match(/BT\s*([\s\S]*?)\s*ET/g) || [];
   for (const match of btMatches) {
     const tjMatches = match.match(/\[([^\]]+)\]\s*TJ/g) || [];
@@ -62,19 +150,15 @@ function extractTextFromPDFBuffer(buffer: Uint8Array): string {
     }
   }
   
-  // Combine extracted text
   let result = extractedTexts.join(" ").replace(/\s+/g, " ").trim();
   
-  // If we couldn't extract much text, return a message indicating the PDF format
   if (result.length < 100) {
-    // Try to extract any visible ASCII text from the buffer
     const asciiText = Array.from(buffer)
       .filter(b => (b >= 32 && b <= 126) || b === 10 || b === 13)
       .map(b => String.fromCharCode(b))
       .join("");
     
-    // Look for account-related keywords and surrounding text
-    const keywords = ["account", "balance", "payment", "collection", "experian", "equifax", "transunion", "credit", "inquiry", "late"];
+    const keywords = ["account", "balance", "payment", "collection", "experian", "equifax", "transunion", "credit", "inquiry", "late", "charge-off", "delinquent"];
     const lines = asciiText.split(/[\n\r]+/);
     const relevantLines: string[] = [];
     
@@ -90,11 +174,7 @@ function extractTextFromPDFBuffer(buffer: Uint8Array): string {
     }
   }
   
-  // Truncate to avoid token limits
-  if (result.length > 15000) {
-    result = result.substring(0, 15000) + "\n[... content truncated for analysis ...]";
-  }
-  
+  console.log(`Fallback extracted ${result.length} characters`);
   return result;
 }
 
@@ -110,15 +190,44 @@ async function extractTextFromBase64PDF(base64Data: string): Promise<string> {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
-    // Extract text from PDF buffer
-    const text = extractTextFromPDFBuffer(bytes);
+    let extractedText = "";
     
-    if (text.length < 50) {
-      console.log("Limited text extraction from PDF, file may be image-based or encrypted");
-      return "[PDF content could not be fully extracted - file may be image-based or protected]";
+    // Try PDF.js first (handles modern compressed PDFs)
+    try {
+      extractedText = await extractTextWithPDFJS(bytes);
+      
+      // Check if we got meaningful content
+      if (extractedText.length > 200) {
+        const cleanedText = cleanCreditReportText(extractedText);
+        console.log(`PDF.js extraction successful: ${cleanedText.length} chars after cleaning`);
+        
+        // Truncate to avoid token limits (increased to 30000)
+        if (cleanedText.length > 30000) {
+          return cleanedText.substring(0, 30000) + "\n[... content truncated for analysis ...]";
+        }
+        return cleanedText;
+      }
+      
+      console.log("PDF.js extraction returned minimal content, trying fallback...");
+    } catch (pdfJsError) {
+      console.log("PDF.js parsing failed, using fallback:", pdfJsError);
     }
     
-    return text;
+    // Fallback to regex-based extraction
+    extractedText = extractTextFromPDFBufferFallback(bytes);
+    
+    if (extractedText.length > 100) {
+      const cleanedText = cleanCreditReportText(extractedText);
+      
+      if (cleanedText.length > 30000) {
+        return cleanedText.substring(0, 30000) + "\n[... content truncated for analysis ...]";
+      }
+      return cleanedText;
+    }
+    
+    console.log("Both extraction methods returned minimal content");
+    return "[PDF content could not be fully extracted - file may be image-based or protected. Please ensure you're uploading a text-based PDF credit report.]";
+    
   } catch (error) {
     console.error("PDF extraction error:", error);
     throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -149,7 +258,6 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
-    // Verify the user
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
@@ -162,22 +270,22 @@ serve(async (req) => {
       throw new Error("Report ID is required");
     }
 
-    // Update report status to processing
     await supabase
       .from("reports")
       .update({ status: "processing" })
       .eq("id", reportId)
       .eq("user_id", user.id);
 
-    // Parse PDFs server-side
     const fileContents: Record<string, string> = {};
     
-    console.log("Parsing uploaded PDFs...");
+    console.log("Parsing uploaded PDFs with enhanced extraction...");
     
     if (files.experian) {
       try {
         fileContents.experian = await extractTextFromBase64PDF(files.experian);
         console.log(`Parsed Experian PDF: ${fileContents.experian.length} chars`);
+        // Log first 500 chars for debugging
+        console.log(`Experian preview: ${fileContents.experian.substring(0, 500)}...`);
       } catch (e) {
         console.error("Failed to parse Experian PDF:", e);
         fileContents.experian = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
@@ -188,6 +296,7 @@ serve(async (req) => {
       try {
         fileContents.equifax = await extractTextFromBase64PDF(files.equifax);
         console.log(`Parsed Equifax PDF: ${fileContents.equifax.length} chars`);
+        console.log(`Equifax preview: ${fileContents.equifax.substring(0, 500)}...`);
       } catch (e) {
         console.error("Failed to parse Equifax PDF:", e);
         fileContents.equifax = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
@@ -198,13 +307,13 @@ serve(async (req) => {
       try {
         fileContents.transunion = await extractTextFromBase64PDF(files.transunion);
         console.log(`Parsed TransUnion PDF: ${fileContents.transunion.length} chars`);
+        console.log(`TransUnion preview: ${fileContents.transunion.substring(0, 500)}...`);
       } catch (e) {
         console.error("Failed to parse TransUnion PDF:", e);
         fileContents.transunion = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
       }
     }
 
-    // Build the prompt for credit report analysis
     const bureauData = [];
     if (fileContents.experian && !fileContents.experian.startsWith("[Error")) {
       bureauData.push(`EXPERIAN REPORT:\n${fileContents.experian}`);
@@ -344,11 +453,9 @@ Response format:
 
     console.log("AI response received, parsing...");
 
-    // Parse the JSON response - handle potential markdown code blocks
     let analysisResult;
     try {
       let jsonContent = content;
-      // Remove markdown code blocks if present
       if (jsonContent.includes("```json")) {
         jsonContent = jsonContent.replace(/```json\n?/g, "").replace(/```\n?/g, "");
       } else if (jsonContent.includes("```")) {
@@ -360,14 +467,11 @@ Response format:
       throw new Error("Failed to parse analysis results");
     }
 
-    // Store discrepancies in the database
     const discrepancies = analysisResult.discrepancies || [];
     
-    // Helper to safely convert values, handling string "null" from AI
     const safeValue = (val: any) => (val === null || val === undefined || val === "null" || val === "") ? null : val;
     const safeDateValue = (val: any) => {
       if (val === null || val === undefined || val === "null" || val === "") return null;
-      // Validate it's a proper date format
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       return dateRegex.test(val) ? val : null;
     };
@@ -404,7 +508,6 @@ Response format:
       }
     }
 
-    // Update report with results
     const { error: updateError } = await supabase
       .from("reports")
       .update({
