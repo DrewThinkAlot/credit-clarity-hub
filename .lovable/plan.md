@@ -1,254 +1,164 @@
 
+# Improved PDF Parsing and Credit Report Analysis
 
-# Expert AI Prompts for Credit Report Analysis
-
-This plan enhances both the credit analysis and letter generation AI prompts with comprehensive FCRA expertise, industry knowledge, and strategic dispute guidance.
-
----
-
-## Overview
-
-The current prompts are functional but lack the depth needed for professional-grade credit repair analysis. We'll transform them into expert-level prompts that understand:
-
-- FCRA regulations and violation types
-- Metro 2 data furnishing standards
-- Bureau-specific reporting patterns
-- Strategic dispute prioritization
-- Success probability factors
+This plan addresses the core issue: the current PDF text extraction in the edge function is too basic and cannot handle modern compressed PDF formats, resulting in garbled text like "encoded_pattern" instead of actual account names.
 
 ---
 
-## Part 1: Enhanced Credit Analysis Prompt
+## Problem Analysis
 
-### Current Issues
-- Generic instructions without FCRA specifics
-- No guidance on identifying violation types
-- Missing account matching logic for cross-bureau comparison
-- No prioritization framework
+Your actual credit reports contain clear, structured data:
 
-### New System Prompt Structure
+| Account | Balance | Status | Bureau(s) |
+|---------|---------|--------|-----------|
+| Credit One Bank | $654 | 120+ Days Late | All 3 |
+| Jefferson Capital (Aspire) | $777 | Collection | Experian, Equifax |
+| Credence Resource (AT&T) | $2,459 | Collection | Experian |
+| Midland Credit | $700 | Collection | Equifax |
+| Chime/Stride | $44 | Charge-off | Experian, TransUnion |
+| Capital One | $0 | Paid/Closed | Experian, TransUnion |
 
-```text
-ROLE & EXPERTISE
----------------
-You are an expert credit repair analyst with 15+ years of experience 
-in FCRA compliance, Metro 2 data standards, and consumer credit law.
+However, the system currently shows "Unknown Creditor (Corrupted Data Block)" because:
+1. The PDF extraction function only handles uncompressed PDF streams
+2. Most modern PDFs use FlateDecode compression
+3. The regex-based approach misses structured data in tables
 
-FCRA KNOWLEDGE BASE
--------------------
-- Section 605: 7-year reporting limit (10 years for bankruptcy)
-- Section 609: Right to file disclosure
-- Section 611: 30-day investigation requirement
-- Section 623: Furnisher accuracy obligations
-- Section 605B: Identity theft protections
+---
 
-VIOLATION DETECTION
--------------------
-1. Re-aging: Date of First Delinquency (DOFD) changed to extend reporting
-2. Mixed Files: Accounts belonging to someone with similar name/SSN
-3. Duplicate Reporting: Same debt reported by multiple collectors
-4. Balance Inflation: Balances higher than original debt
-5. Status Conflicts: Different payment status across bureaus
-6. Outdated Information: Items past 7-year limit
-7. Unauthorized Inquiries: Hard pulls without permissible purpose
+## Solution: Use a Proper PDF Parser
 
-ACCOUNT MATCHING RULES
-----------------------
-- Match by: Account number (partial), creditor name, balance range
-- Flag as conflict when same account shows different statuses
-- Note when account appears on one bureau but not others
+### Option A: Use pdf-parse Library (Recommended)
 
-DISPUTE STRATEGY FRAMEWORK
---------------------------
-Priority 1 (High Impact):
-- Late payments on otherwise good accounts
-- Collections under $500 (pay-for-delete candidates)
-- Accounts with clear FCRA violations
+Replace the basic text extraction with the `pdf-parse` library which handles:
+- FlateDecode and other compression methods
+- Font encoding and character mapping
+- Table structure preservation
 
-Priority 2 (Medium Impact):
-- Inquiries over 6 months old
-- Accounts with balance discrepancies
+### Option B: Pre-process PDFs on Frontend
 
-Priority 3 (Lower Impact):
-- Minor date discrepancies
-- Address/employer variations
+Use a client-side PDF parser before sending to the edge function, but this has issues with large files and browser memory.
 
-SUCCESS PROBABILITY FACTORS
----------------------------
-- Age of account (older = higher success)
-- Documentation quality of original creditor
-- Whether debt has been sold multiple times
-- Amount of debt (smaller = more negotiable)
-- Clear factual errors (highest success rate)
-```
+---
 
-### New JSON Output Schema
+## Implementation Plan
 
-The enhanced prompt will require additional fields:
+### Part 1: Update Edge Function with Better PDF Parsing
 
-```json
-{
-  "potential_score_increase": 45,
-  "analysis_summary": "Found 3 high-priority violations...",
-  "discrepancies": [
-    {
-      "account_name": "Capital One Auto",
-      "account_number_partial": "****4521",
-      "account_type": "auto_loan",
-      "original_creditor": "Capital One",
-      "current_creditor": "Capital One",
-      "equifax_status": "30 days late",
-      "experian_status": "Current",
-      "transunion_status": "30 days late",
-      "has_conflict": true,
-      "violation_type": "status_conflict",
-      "fcra_section": "611",
-      "severity": "high",
-      "recommended_action": "Dispute inconsistent payment status...",
-      "dispute_reason": "Payment history differs between bureaus",
-      "discrepancy_type": "dispute",
-      "success_probability": 78,
-      "amount": 15420,
-      "date_opened": "2022-03-15",
-      "date_of_first_delinquency": null,
-      "priority_rank": 1
-    }
-  ]
+**File: `supabase/functions/analyze-report/index.ts`**
+
+Replace the `extractTextFromPDFBuffer` function with a library-based solution using `pdf-parse` for Deno:
+
+```typescript
+// Use pdfjs-dist for Deno-compatible PDF parsing
+import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
+
+async function extractTextFromPDFBuffer(buffer: Uint8Array): Promise<string> {
+  const loadingTask = pdfjsLib.getDocument({ data: buffer });
+  const pdf = await loadingTask.promise;
+  
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(" ");
+    fullText += pageText + "\n";
+  }
+  
+  return fullText.substring(0, 30000); // Increased limit for better analysis
 }
 ```
 
----
+### Part 2: Enhanced Text Cleaning
 
-## Part 2: Enhanced Letter Generation Prompt
+Add post-processing to clean extracted text:
 
-### Current Issues
-- Generic letter template approach
-- No FCRA section citations
-- Missing enclosure recommendations
-- No dispute reason categorization
-
-### New System Prompt Structure
-
-```text
-ROLE & EXPERTISE
----------------
-You are a consumer rights attorney specializing in FCRA disputes. 
-Generate legally-sound dispute letters that maximize success rates.
-
-LETTER TYPES & STRATEGIES
--------------------------
-
-TYPE 1: FCRA 611 DISPUTE (Standard)
-- Cite Section 611(a)(1)(A) - reasonable investigation required
-- Request method of verification
-- 30-day response deadline
-- Threaten FTC complaint if ignored
-
-TYPE 2: FCRA 609 DISCLOSURE REQUEST
-- Request complete file disclosure
-- Ask for all furnisher information
-- Demand investigation procedures used
-
-TYPE 3: DEBT VALIDATION (FDCPA 809)
-- For collections under 30 days old
-- Request original signed agreement
-- Demand complete chain of custody
-
-TYPE 4: PAY-FOR-DELETE NEGOTIATION
-- Offer settlement percentage
-- Request deletion as condition
-- Get agreement in writing first
-
-TYPE 5: FCRA 605 OBSOLETE DATA
-- Cite 7-year/10-year limits
-- Provide calculation of reporting period
-- Demand immediate deletion
-
-LETTER COMPONENTS
------------------
-1. Consumer identification (name, SSN last 4, DOB, addresses)
-2. Account identification (account #, creditor, balance)
-3. Specific dispute reason with facts
-4. FCRA citation with quoted text
-5. Specific remedy requested
-6. 30-day deadline reminder
-7. FTC/CFPB complaint warning
-8. Enclosure list (ID copies, proof documents)
-
-BUREAU-SPECIFIC ADDRESSES (with dispute department)
----------------------------------------------------
-Experian: P.O. Box 4500, Allen, TX 75013
-Equifax: P.O. Box 740256, Atlanta, GA 30348-0256
-TransUnion: P.O. Box 2000, Chester, PA 19016
-
-FORMATTING REQUIREMENTS
------------------------
-- Formal business letter format
-- Certified mail recommended
-- Return receipt requested
-- Keep copy for records
-- Date prominently displayed
+```typescript
+function cleanCreditReportText(rawText: string): string {
+  // Normalize whitespace
+  let text = rawText.replace(/\s+/g, " ");
+  
+  // Preserve table structures by detecting common patterns
+  text = text.replace(/(\d+\s+days?\s+(?:late|past due))/gi, "\n$1");
+  text = text.replace(/(Account\s+(?:Name|Number|Status))/gi, "\n$1");
+  
+  // Remove footer/header noise
+  text = text.replace(/Page \d+ of \d+/gi, "");
+  text = text.replace(/000000001-DISC/g, "");
+  
+  return text.trim();
+}
 ```
 
----
+### Part 3: Fallback Mechanism
 
-## Part 3: Implementation Changes
+If the PDF library fails, fall back to the current approach but with better error messaging:
 
-### File: `supabase/functions/analyze-report/index.ts`
+```typescript
+async function extractTextFromBase64PDF(base64Data: string): Promise<string> {
+  try {
+    // Primary method: PDF.js parsing
+    const text = await extractWithPDFJS(buffer);
+    if (text.length > 200) return cleanCreditReportText(text);
+  } catch (e) {
+    console.log("PDF.js parsing failed, trying fallback:", e);
+  }
+  
+  // Fallback: Regex-based extraction
+  return extractTextFromPDFBuffer(buffer);
+}
+```
 
-**Lines 219-258**: Replace the basic `systemPrompt` with the comprehensive expert prompt (~150 lines)
+### Part 4: Increase Token Limits
 
-**Key additions:**
-- FCRA section references
-- Violation type taxonomy
-- Account matching logic instructions
-- Priority ranking system
-- Enhanced JSON schema
-
-### File: `supabase/functions/generate-letter/index.ts`
-
-**Lines 75-106**: Replace basic letter prompt with expert template (~100 lines)
-
-**Key additions:**
-- Letter type selection based on discrepancy type
-- FCRA section citations with quoted text
-- Enclosure recommendations
-- Bureau-specific formatting
-- Legal language templates
-
----
-
-## Part 4: Database Schema Update (Optional Enhancement)
-
-Add new columns to capture enhanced analysis data:
-
-| Table | New Column | Type | Purpose |
-|-------|-----------|------|---------|
-| discrepancies | violation_type | text | FCRA violation category |
-| discrepancies | fcra_section | text | Relevant FCRA section |
-| discrepancies | priority_rank | integer | Dispute priority (1-3) |
-| discrepancies | account_number_partial | text | Last 4 of account # |
-| discrepancies | date_of_first_delinquency | date | For statute tracking |
+Update the analysis to handle larger text:
+- Increase text limit from 15,000 to 30,000 chars per file
+- Use the full power of Gemini 3 Pro's context window
 
 ---
 
-## Benefits of Enhanced Prompts
+## Alternative: Document Processing Service
 
-| Aspect | Before | After |
-|--------|--------|-------|
-| FCRA Knowledge | Basic mentions | Full section citations |
-| Violation Detection | Generic "discrepancy" | 7 specific violation types |
-| Account Matching | None | Cross-bureau matching rules |
-| Dispute Strategy | Simple categories | Priority-ranked framework |
-| Letter Quality | Generic template | Type-specific legal letters |
-| Success Guidance | Basic probability % | Factor-based estimation |
+If PDF.js proves unreliable in Deno, consider:
+
+1. **Use Lovable's Document Parser** - The same tool I used to read your PDFs
+2. **Store parsed text in database** - Parse once on upload, store structured text
+3. **External PDF API** - Services like pdf.co or Adobe PDF Services
+
+---
+
+## Expected Results After Fix
+
+The system should correctly identify:
+
+| Priority | Account | Violation | FCRA Section | Success Rate |
+|----------|---------|-----------|--------------|--------------|
+| 1 | Credit One Bank ($654) | Recent Delinquency, First Payment Never Received | 611 | 65% |
+| 1 | Jefferson Capital ($777) | Debt Buyer Collection | 609, 611 | 70% |
+| 1 | Credence Resource ($2,459) | Collection with Status Conflict | 611, 623 | 60% |
+| 2 | Midland Credit ($700) | Debt Buyer, Already Disputed | 611 | 55% |
+| 2 | Chime/Stride ($44) | Small Charge-off | Pay-for-Delete | 85% |
+| 3 | ML Enterprise ($72) | Small Charge-off | Pay-for-Delete | 90% |
+
+**Potential Score Increase: 45-75 points** (based on removing collections and late payments)
 
 ---
 
 ## Technical Notes
 
-- Prompts stored as constants at top of edge function files
-- Temperature remains at 0.3 for analysis (consistency) and 0.4 for letters (slight creativity)
-- JSON schema validation unchanged - new fields are additive
-- Backward compatible with existing discrepancy records
+- Deno runtime may require specific import configurations for PDF.js
+- Worker threads are not available in edge functions, so PDF.js initialization needs adjustment
+- Consider caching parsed text to avoid re-parsing on retries
+- Add better logging to track what text was actually extracted for debugging
+
+---
+
+## Testing Plan
+
+1. Deploy updated edge function
+2. Re-upload your credit reports
+3. Check edge function logs for extracted text quality
+4. Verify discrepancies match the actual accounts from your reports
+5. Generate a dispute letter and verify it references real account names
 
