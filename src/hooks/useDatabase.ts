@@ -1,9 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Report, Discrepancy, Letter, UploadedFile, AnalysisResult, GenerateLetterResult } from "@/types/database";
+import { Report, Discrepancy, Letter, UploadedFile, AnalysisResult, GenerateLetterResult, Profile } from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { extractTextFromPDF } from "@/lib/pdfParser";
+
+// Helper to convert File to base64
+async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+}
 
 // Reports hooks
 export function useReports() {
@@ -151,6 +160,64 @@ export function useLetter(letterId: string | null) {
   });
 }
 
+// Profile hooks
+export function useProfile() {
+  const { user } = useAuth();
+  
+  return useQuery({
+    queryKey: ["profile", user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (error) throw error;
+      return data as Profile | null;
+    },
+    enabled: !!user,
+  });
+}
+
+export function useUpdateProfile() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (profileData: Partial<Profile>) => {
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          ...profileData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been saved successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Update Failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
+      });
+    },
+  });
+}
+
 // Mutations
 export function useCreateReport() {
   const { user, session } = useAuth();
@@ -204,29 +271,26 @@ export function useCreateReport() {
         })
         .eq("id", report.id);
 
-      // Extract text from PDFs using pdfjs-dist
-      const fileContents: Record<string, string> = {};
+      // Convert PDFs to base64 for server-side parsing
+      const base64Files: Record<string, string> = {};
       
       for (const uploadedFile of files) {
         if (uploadedFile.bureau === "unknown") continue;
         
         try {
-          console.log(`Parsing PDF for ${uploadedFile.bureau}...`);
-          const textContent = await extractTextFromPDF(uploadedFile.file);
-          fileContents[uploadedFile.bureau] = textContent;
-          console.log(`Extracted ${textContent.length} characters from ${uploadedFile.bureau} report`);
+          console.log(`Converting ${uploadedFile.bureau} PDF to base64...`);
+          const base64 = await fileToBase64(uploadedFile.file);
+          base64Files[uploadedFile.bureau] = base64;
         } catch (e) {
-          console.error(`Error parsing ${uploadedFile.bureau} PDF:`, e);
-          // Include error info so AI knows this file couldn't be parsed
-          fileContents[uploadedFile.bureau] = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
+          console.error(`Error converting ${uploadedFile.bureau} PDF:`, e);
         }
       }
 
-      // Call the analyze-report edge function
+      // Call the analyze-report edge function with base64 files
       const response = await supabase.functions.invoke("analyze-report", {
         body: {
           reportId: report.id,
-          fileContents,
+          files: base64Files,
         },
       });
 
@@ -261,10 +325,16 @@ export function useGenerateLetter() {
       discrepancyId,
       reportId,
       bureau,
+      userInfo,
     }: {
       discrepancyId: string;
       reportId?: string;
       bureau: "experian" | "equifax" | "transunion";
+      userInfo?: {
+        name?: string;
+        address?: string;
+        ssn_last_four?: string;
+      };
     }): Promise<GenerateLetterResult> => {
       if (!user || !session) {
         throw new Error("Not authenticated");
@@ -275,6 +345,7 @@ export function useGenerateLetter() {
           discrepancyId,
           reportId,
           bureau,
+          userInfo,
         },
       });
 
@@ -316,9 +387,21 @@ export function useUpdateLetterStatus() {
     }) => {
       if (!user) throw new Error("Not authenticated");
 
+      const updateData: Record<string, any> = { status };
+      
+      // Auto-set sent_date and response_due_date when marking as sent
+      if (status === "sent") {
+        const now = new Date();
+        const dueDate = new Date(now);
+        dueDate.setDate(dueDate.getDate() + 30); // 30-day FCRA investigation period
+        
+        updateData.sent_date = now.toISOString();
+        updateData.response_due_date = dueDate.toISOString();
+      }
+
       const { error } = await supabase
         .from("letters")
-        .update({ status })
+        .update(updateData)
         .eq("id", letterId)
         .eq("user_id", user.id);
 
@@ -329,6 +412,46 @@ export function useUpdateLetterStatus() {
       toast({
         title: "Status Updated",
         description: "Letter status has been updated.",
+      });
+    },
+  });
+}
+
+export function useUpdateLetterContent() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({
+      letterId,
+      content,
+    }: {
+      letterId: string;
+      content: string;
+    }) => {
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase
+        .from("letters")
+        .update({ content, updated_at: new Date().toISOString() })
+        .eq("id", letterId)
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["letters"] });
+      toast({
+        title: "Letter Saved",
+        description: "Your changes have been saved.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Save Failed",
+        description: error instanceof Error ? error.message : "An error occurred",
+        variant: "destructive",
       });
     },
   });

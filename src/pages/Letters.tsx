@@ -6,15 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { 
   FileText, 
   Download, 
-  Eye, 
+  Edit, 
   Clock, 
   CheckCircle, 
   Send, 
   Loader2,
-  X
+  Calendar,
+  Copy,
+  Check
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLetters, useUpdateLetterStatus } from "@/hooks/useDatabase";
+import { useLetters, useUpdateLetterStatus, useProfile } from "@/hooks/useDatabase";
 import { Letter } from "@/types/database";
 import { jsPDF } from "jspdf";
 import { useToast } from "@/hooks/use-toast";
@@ -31,6 +33,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LetterEditor } from "@/components/letters/LetterEditor";
+import { format, differenceInDays } from "date-fns";
 
 const bureauColors: Record<string, string> = {
   experian: "bg-blue-500/10 text-blue-400 border-blue-500/20",
@@ -46,9 +50,11 @@ const statusConfig: Record<string, { label: string; icon: any; color: string }> 
 
 export default function Letters() {
   const { data: letters, isLoading } = useLetters();
+  const { data: profile } = useProfile();
   const updateStatus = useUpdateLetterStatus();
   const { toast } = useToast();
-  const [previewLetter, setPreviewLetter] = useState<Letter | null>(null);
+  const [editingLetter, setEditingLetter] = useState<Letter | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const handleDownload = (letter: Letter) => {
     const doc = new jsPDF();
@@ -80,13 +86,42 @@ export default function Letters() {
     });
   };
 
+  const handleCopy = async (letter: Letter) => {
+    try {
+      await navigator.clipboard.writeText(letter.content);
+      setCopied(letter.id);
+      toast({
+        title: "Copied to Clipboard",
+        description: "Letter content has been copied.",
+      });
+      setTimeout(() => setCopied(null), 2000);
+    } catch (err) {
+      toast({
+        title: "Copy Failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleStatusChange = async (letterId: string, newStatus: "draft" | "sent" | "response") => {
     await updateStatus.mutateAsync({ letterId, status: newStatus });
+  };
+
+  const getDaysRemaining = (letter: Letter) => {
+    if (!letter.response_due_date) return null;
+    const dueDate = new Date(letter.response_due_date);
+    const today = new Date();
+    const days = differenceInDays(dueDate, today);
+    return days;
   };
 
   const draftCount = letters?.filter(l => l.status === "draft").length || 0;
   const sentCount = letters?.filter(l => l.status === "sent").length || 0;
   const responseCount = letters?.filter(l => l.status === "response").length || 0;
+
+  // Check if profile is incomplete
+  const profileIncomplete = !profile?.full_name || !profile?.address;
 
   if (isLoading) {
     return (
@@ -110,6 +145,17 @@ export default function Letters() {
             </p>
           </div>
         </div>
+
+        {/* Profile Warning */}
+        {profileIncomplete && (
+          <Card className="glass-card border-amber-500/30 bg-amber-500/5">
+            <CardContent className="p-4">
+              <p className="text-sm text-amber-400">
+                <strong>Tip:</strong> Complete your profile in Settings to have your name and address automatically filled in new letters.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats */}
         <div className="grid gap-4 md:grid-cols-3">
@@ -154,6 +200,7 @@ export default function Letters() {
             {letters.map((letter) => {
               const status = statusConfig[letter.status];
               const StatusIcon = status.icon;
+              const daysRemaining = getDaysRemaining(letter);
               
               return (
                 <Card key={letter.id} className="glass-card hover:border-primary/30 transition-colors">
@@ -166,9 +213,9 @@ export default function Letters() {
                         <div>
                           <h3 className="font-semibold">{letter.title}</h3>
                           <p className="text-sm text-muted-foreground mt-1">
-                            {letter.account_name} • Created {new Date(letter.created_at).toLocaleDateString()}
+                            {letter.account_name} • Created {format(new Date(letter.created_at), "MMM d, yyyy")}
                           </p>
-                          <div className="flex items-center gap-2 mt-2">
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
                             <Badge variant="outline" className={bureauColors[letter.bureau]}>
                               {letter.bureau.charAt(0).toUpperCase() + letter.bureau.slice(1)}
                             </Badge>
@@ -186,6 +233,23 @@ export default function Letters() {
                                 <SelectItem value="response">Response Received</SelectItem>
                               </SelectContent>
                             </Select>
+                            {letter.status === "sent" && daysRemaining !== null && (
+                              <Badge 
+                                variant="outline" 
+                                className={cn(
+                                  "gap-1",
+                                  daysRemaining <= 5 ? "border-amber-500/50 text-amber-400" : "border-muted"
+                                )}
+                              >
+                                <Calendar className="w-3 h-3" />
+                                {daysRemaining > 0 
+                                  ? `${daysRemaining} days to respond`
+                                  : daysRemaining === 0
+                                  ? "Response due today"
+                                  : `${Math.abs(daysRemaining)} days overdue`
+                                }
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -193,10 +257,27 @@ export default function Letters() {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => setPreviewLetter(letter)}
+                          onClick={() => handleCopy(letter)}
                         >
-                          <Eye className="w-4 h-4 mr-2" />
-                          Preview
+                          {copied === letter.id ? (
+                            <>
+                              <Check className="w-4 h-4 mr-2 text-success" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-4 h-4 mr-2" />
+                              Copy
+                            </>
+                          )}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => setEditingLetter(letter)}
+                        >
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit
                         </Button>
                         <Button 
                           variant="outline" 
@@ -204,7 +285,7 @@ export default function Letters() {
                           onClick={() => handleDownload(letter)}
                         >
                           <Download className="w-4 h-4 mr-2" />
-                          Download
+                          PDF
                         </Button>
                       </div>
                     </div>
@@ -225,22 +306,23 @@ export default function Letters() {
           </Card>
         )}
 
-        {/* Letter Preview Dialog */}
-        <Dialog open={!!previewLetter} onOpenChange={() => setPreviewLetter(null)}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        {/* Letter Editor Dialog */}
+        <Dialog open={!!editingLetter} onOpenChange={() => setEditingLetter(null)}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>{previewLetter?.title}</DialogTitle>
+              <DialogTitle>{editingLetter?.title}</DialogTitle>
             </DialogHeader>
-            <div className="mt-4 p-4 bg-secondary/30 rounded-lg">
-              <pre className="whitespace-pre-wrap font-mono text-sm">
-                {previewLetter?.content}
-              </pre>
-            </div>
+            {editingLetter && (
+              <LetterEditor 
+                letter={editingLetter} 
+                onClose={() => setEditingLetter(null)}
+              />
+            )}
             <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" onClick={() => setPreviewLetter(null)}>
+              <Button variant="outline" onClick={() => setEditingLetter(null)}>
                 Close
               </Button>
-              <Button onClick={() => previewLetter && handleDownload(previewLetter)}>
+              <Button onClick={() => editingLetter && handleDownload(editingLetter)}>
                 <Download className="w-4 h-4 mr-2" />
                 Download PDF
               </Button>

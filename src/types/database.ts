@@ -42,6 +42,10 @@ export interface Letter {
   status: "draft" | "sent" | "response";
   content: string;
   account_name: string | null;
+  sent_date: string | null;
+  response_due_date: string | null;
+  resolution_status: string | null;
+  response_content: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +55,12 @@ export interface Profile {
   user_id: string;
   email: string | null;
   full_name: string | null;
+  address: string | null;
+  phone: string | null;
+  ssn_last_four: string | null;
+  notification_email_enabled: boolean;
+  notification_analysis_complete: boolean;
+  notification_response_received: boolean;
   created_at: string;
   updated_at: string;
 }
