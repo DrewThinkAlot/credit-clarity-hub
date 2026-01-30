@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { SummaryHeader } from "@/components/dashboard/SummaryHeader";
 import { DiscrepancyMatrix } from "@/components/dashboard/DiscrepancyMatrix";
-import { StrategyCards } from "@/components/dashboard/StrategyCards";
+import { ActionPlan } from "@/components/dashboard/ActionPlan";
 import { useToast } from "@/hooks/use-toast";
 import { useLatestReport, useDiscrepancies, useGenerateLetter } from "@/hooks/useDatabase";
 import { Button } from "@/components/ui/button";
@@ -155,15 +155,19 @@ export default function Dashboard() {
     severity: d.severity,
   })) || [];
 
-  const formattedStrategies = discrepancies?.map(d => ({
+  // Format for ActionPlan component
+  const actionItems = discrepancies?.map(d => ({
     id: d.id,
-    type: d.discrepancy_type || "dispute" as "dispute" | "pay-for-delete" | "validation",
-    title: `${d.discrepancy_type === "dispute" ? "Dispute" : d.discrepancy_type === "validation" ? "Validate" : "Pay for Delete"} ${d.account_name}`,
+    accountName: d.account_name,
+    type: (d.discrepancy_type || "dispute") as "dispute" | "pay-for-delete" | "validation",
+    priority: (d.severity || "medium") as "high" | "medium" | "low",
+    impact: d.severity === "high" ? "High Impact" as const : 
+            d.severity === "low" ? "Complex" as const : "Quick Win" as const,
     description: d.recommended_action || "Take action on this account",
     successProbability: d.success_probability || undefined,
     amount: d.amount ? Number(d.amount) : undefined,
-    priority: d.severity,
-    accountName: d.account_name,
+    fcraSection: d.fcra_section || undefined,
+    violationType: d.violation_type || undefined,
   })) || [];
 
   return (
@@ -182,9 +186,10 @@ export default function Dashboard() {
         {/* Discrepancy Matrix */}
         <DiscrepancyMatrix discrepancies={formattedDiscrepancies} />
 
-        {/* Strategy Cards */}
-        <StrategyCards 
-          strategies={formattedStrategies} 
+        {/* Action Plan (replaces Strategy Cards) */}
+        <ActionPlan 
+          potentialScoreIncrease={latestReport?.potential_score_increase || 0}
+          items={actionItems} 
           onGenerateLetter={handleGenerateLetter}
           isGenerating={generateLetter.isPending}
         />
