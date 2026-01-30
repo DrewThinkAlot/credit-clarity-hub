@@ -5,6 +5,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { UploadedFile } from "@/types/database";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // Bureau icons as simple components
 const ExperianIcon = () => (
@@ -176,28 +183,50 @@ export function FileDropzone({ onFilesChange, files }: FileDropzoneProps) {
                   getBureauColor(uploadedFile.bureau)
                 )}
               >
-                <div className="flex items-center gap-3">
-                  <FileCheck className="w-5 h-5 text-primary" />
-                  <div>
-                    <p className="font-medium text-sm truncate max-w-[200px] md:max-w-none">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <FileCheck className="w-5 h-5 text-primary shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">
                       {uploadedFile.file.name}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {getBureauLabel(uploadedFile.bureau)} • {(uploadedFile.file.size / 1024 / 1024).toFixed(2)} MB
+                      {(uploadedFile.file.size / 1024 / 1024).toFixed(2)} MB
                     </p>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFile(index);
-                  }}
-                  className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
+                
+                {/* Bureau selector dropdown */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <Select
+                    value={uploadedFile.bureau}
+                    onValueChange={(value: UploadedFile["bureau"]) => {
+                      const newFiles = [...files];
+                      newFiles[index].bureau = value;
+                      onFilesChange(newFiles);
+                    }}
+                  >
+                    <SelectTrigger className="w-[130px] h-8 text-xs">
+                      <SelectValue placeholder="Select bureau" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="experian">Experian</SelectItem>
+                      <SelectItem value="equifax">Equifax</SelectItem>
+                      <SelectItem value="transunion">TransUnion</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(index);
+                    }}
+                    className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

@@ -233,52 +233,55 @@ export function useCreateReport() {
 
       if (reportError) throw reportError;
 
-      // Upload files to storage
-      const filePaths: Record<string, string> = {};
+      // Upload files to storage and parse PDFs in parallel
+      const validFiles = files.filter(f => f.bureau !== "unknown");
       
-      for (const uploadedFile of files) {
-        if (uploadedFile.bureau === "unknown") continue;
-        
+      // Parallel file uploads
+      const uploadPromises = validFiles.map(async (uploadedFile) => {
         const filePath = `${user.id}/${report.id}/${uploadedFile.bureau}.pdf`;
-        
-        const { error: uploadError } = await supabase.storage
+        const { error } = await supabase.storage
           .from("credit-reports")
           .upload(filePath, uploadedFile.file);
 
-        if (uploadError) {
-          console.error("Upload error:", uploadError);
-        } else {
-          filePaths[uploadedFile.bureau] = filePath;
+        if (error) {
+          console.error(`Upload error for ${uploadedFile.bureau}:`, error);
+          return null;
         }
-      }
+        return { bureau: uploadedFile.bureau, path: filePath };
+      });
 
-      // Update report with file paths
-      await supabase
-        .from("reports")
-        .update({
-          experian_file_path: filePaths.experian || null,
-          equifax_file_path: filePaths.equifax || null,
-          transunion_file_path: filePaths.transunion || null,
-        })
-        .eq("id", report.id);
-
-      // Parse PDFs client-side (avoids server timeouts with large files)
+      // Parallel PDF parsing (client-side to avoid server timeouts)
       console.log("Parsing PDFs client-side...");
-      const extractedTexts: Record<string, string> = {};
-      
-      for (const uploadedFile of files) {
-        if (uploadedFile.bureau === "unknown") continue;
-        
+      const parsePromises = validFiles.map(async (uploadedFile) => {
         try {
           console.log(`Parsing ${uploadedFile.bureau} PDF...`);
           const text = await parsePdfText(uploadedFile.file);
-          extractedTexts[uploadedFile.bureau] = text;
           console.log(`Extracted ${text.length} chars from ${uploadedFile.bureau}`);
+          return { bureau: uploadedFile.bureau, text };
         } catch (e) {
           console.error(`Error parsing ${uploadedFile.bureau} PDF:`, e);
-          extractedTexts[uploadedFile.bureau] = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
+          return { bureau: uploadedFile.bureau, text: `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]` };
         }
-      }
+      });
+
+      // Wait for both uploads and parsing to complete in parallel
+      const [uploadResults, parseResults] = await Promise.all([
+        Promise.all(uploadPromises),
+        Promise.all(parsePromises),
+      ]);
+
+      // Construct filePaths and extractedTexts from results
+      const filePaths: Record<string, string> = {};
+      uploadResults.forEach(result => {
+        if (result) filePaths[result.bureau] = result.path;
+      });
+
+      const extractedTexts: Record<string, string> = {};
+      parseResults.forEach(result => {
+        extractedTexts[result.bureau] = result.text;
+      });
+
+      // Update report with file paths
 
       // Call the analyze-report edge function with pre-extracted text
       const response = await supabase.functions.invoke("analyze-report", {
