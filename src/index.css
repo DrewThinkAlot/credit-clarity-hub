@@ -143,6 +143,13 @@
   }
 }
 
+/* Redaction mode - blur sensitive information */
+body.redaction-mode .redact-sensitive,
+body.redaction-mode [data-sensitive="true"] {
+  filter: blur(4px);
+  user-select: none;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

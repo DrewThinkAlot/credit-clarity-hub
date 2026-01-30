@@ -48,6 +48,7 @@ export interface Discrepancy {
   report_id: string;
   user_id: string;
   account_name: string;
+  account_number_partial: string | null;
   equifax_status: string | null;
   experian_status: string | null;
   transunion_status: string | null;
@@ -57,6 +58,10 @@ export interface Discrepancy {
   discrepancy_type: "dispute" | "pay-for-delete" | "validation" | null;
   success_probability: number | null;
   amount: number | null;
+  violation_type: string | null;
+  fcra_section: string | null;
+  priority_rank: number | null;
+  date_of_first_delinquency: string | null;
   resolved: boolean;
   created_at: string;
   updated_at: string;

@@ -6,19 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { 
   FileText, 
   Download, 
-  Edit, 
   Clock, 
   CheckCircle, 
   Send, 
   Loader2,
-  Calendar,
-  Copy,
-  Check
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useLetters, useUpdateLetterStatus, useProfile } from "@/hooks/useDatabase";
 import { Letter } from "@/types/database";
-import { jsPDF } from "jspdf";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -26,27 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { LetterEditor } from "@/components/letters/LetterEditor";
-import { format, differenceInDays } from "date-fns";
-
-const bureauColors: Record<string, string> = {
-  experian: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  equifax: "bg-red-500/10 text-red-400 border-red-500/20",
-  transunion: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-};
-
-const statusConfig: Record<string, { label: string; icon: any; color: string }> = {
-  draft: { label: "Draft", icon: Clock, color: "bg-muted text-muted-foreground" },
-  sent: { label: "Sent", icon: Send, color: "bg-primary/10 text-primary" },
-  response: { label: "Response Received", icon: CheckCircle, color: "bg-success/10 text-success" },
-};
+import { PacketBuilder } from "@/components/letters/PacketBuilder";
+import { CommandCenter } from "@/components/letters/CommandCenter";
+import { ResponseInterpreter } from "@/components/letters/ResponseInterpreter";
+import { jsPDF } from "jspdf";
 
 export default function Letters() {
   const { data: letters, isLoading } = useLetters();
@@ -54,7 +31,7 @@ export default function Letters() {
   const updateStatus = useUpdateLetterStatus();
   const { toast } = useToast();
   const [editingLetter, setEditingLetter] = useState<Letter | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [responseLetterTarget, setResponseLetterTarget] = useState<Letter | null>(null);
 
   const handleDownload = (letter: Letter) => {
     const doc = new jsPDF();
@@ -86,34 +63,18 @@ export default function Letters() {
     });
   };
 
-  const handleCopy = async (letter: Letter) => {
-    try {
-      await navigator.clipboard.writeText(letter.content);
-      setCopied(letter.id);
-      toast({
-        title: "Copied to Clipboard",
-        description: "Letter content has been copied.",
-      });
-      setTimeout(() => setCopied(null), 2000);
-    } catch (err) {
-      toast({
-        title: "Copy Failed",
-        description: "Could not copy to clipboard.",
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleStatusChange = async (letterId: string, newStatus: "draft" | "sent" | "response") => {
     await updateStatus.mutateAsync({ letterId, status: newStatus });
   };
 
-  const getDaysRemaining = (letter: Letter) => {
-    if (!letter.response_due_date) return null;
-    const dueDate = new Date(letter.response_due_date);
-    const today = new Date();
-    const days = differenceInDays(dueDate, today);
-    return days;
+  const handleResolutionStatusUpdate = async (letterId: string, resolutionStatus: string) => {
+    // This would update the resolution_status field
+    // For now, just mark as response received
+    await updateStatus.mutateAsync({ letterId, status: "response" });
+    toast({
+      title: "Status Updated",
+      description: `Letter marked as ${resolutionStatus}.`,
+    });
   };
 
   const draftCount = letters?.filter(l => l.status === "draft").length || 0;
@@ -139,18 +100,18 @@ export default function Letters() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Generated Letters</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Command Center</h1>
             <p className="text-muted-foreground mt-1">
-              AI-generated dispute letters ready to send
+              Track and manage your dispute lifecycle
             </p>
           </div>
         </div>
 
         {/* Profile Warning */}
         {profileIncomplete && (
-          <Card className="glass-card border-amber-500/30 bg-amber-500/5">
+          <Card className="glass-card border-warning/30 bg-warning/5">
             <CardContent className="p-4">
-              <p className="text-sm text-amber-400">
+              <p className="text-sm text-warning">
                 <strong>Tip:</strong> Complete your profile in Settings to have your name and address automatically filled in new letters.
               </p>
             </CardContent>
@@ -194,106 +155,14 @@ export default function Letters() {
           </Card>
         </div>
 
-        {/* Letters list */}
+        {/* Command Center (Kanban/Timeline View) */}
         {letters && letters.length > 0 ? (
-          <div className="space-y-4">
-            {letters.map((letter) => {
-              const status = statusConfig[letter.status];
-              const StatusIcon = status.icon;
-              const daysRemaining = getDaysRemaining(letter);
-              
-              return (
-                <Card key={letter.id} className="glass-card hover:border-primary/30 transition-colors">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center shrink-0">
-                          <FileText className="w-6 h-6 text-primary" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold">{letter.title}</h3>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {letter.account_name} • Created {format(new Date(letter.created_at), "MMM d, yyyy")}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-2 mt-2">
-                            <Badge variant="outline" className={bureauColors[letter.bureau]}>
-                              {letter.bureau.charAt(0).toUpperCase() + letter.bureau.slice(1)}
-                            </Badge>
-                            <Select
-                              value={letter.status}
-                              onValueChange={(value) => handleStatusChange(letter.id, value as "draft" | "sent" | "response")}
-                            >
-                              <SelectTrigger className={cn("w-auto h-7 gap-1 px-2", status.color)}>
-                                <StatusIcon className="w-3 h-3" />
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="draft">Draft</SelectItem>
-                                <SelectItem value="sent">Sent</SelectItem>
-                                <SelectItem value="response">Response Received</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {letter.status === "sent" && daysRemaining !== null && (
-                              <Badge 
-                                variant="outline" 
-                                className={cn(
-                                  "gap-1",
-                                  daysRemaining <= 5 ? "border-amber-500/50 text-amber-400" : "border-muted"
-                                )}
-                              >
-                                <Calendar className="w-3 h-3" />
-                                {daysRemaining > 0 
-                                  ? `${daysRemaining} days to respond`
-                                  : daysRemaining === 0
-                                  ? "Response due today"
-                                  : `${Math.abs(daysRemaining)} days overdue`
-                                }
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 ml-16 md:ml-0">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleCopy(letter)}
-                        >
-                          {copied === letter.id ? (
-                            <>
-                              <Check className="w-4 h-4 mr-2 text-success" />
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-4 h-4 mr-2" />
-                              Copy
-                            </>
-                          )}
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => setEditingLetter(letter)}
-                        >
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleDownload(letter)}
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          PDF
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+          <CommandCenter
+            letters={letters}
+            onEditLetter={setEditingLetter}
+            onStatusChange={handleStatusChange}
+            onUploadResponse={setResponseLetterTarget}
+          />
         ) : (
           <Card className="glass-card">
             <CardContent className="p-12 text-center">
@@ -306,14 +175,14 @@ export default function Letters() {
           </Card>
         )}
 
-        {/* Letter Editor Dialog */}
+        {/* Packet Builder Dialog (replaces simple LetterEditor) */}
         <Dialog open={!!editingLetter} onOpenChange={() => setEditingLetter(null)}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingLetter?.title}</DialogTitle>
             </DialogHeader>
             {editingLetter && (
-              <LetterEditor 
+              <PacketBuilder 
                 letter={editingLetter} 
                 onClose={() => setEditingLetter(null)}
               />
@@ -324,11 +193,19 @@ export default function Letters() {
               </Button>
               <Button onClick={() => editingLetter && handleDownload(editingLetter)}>
                 <Download className="w-4 h-4 mr-2" />
-                Download PDF
+                Quick Download PDF
               </Button>
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Response Interpreter Modal */}
+        <ResponseInterpreter
+          letter={responseLetterTarget}
+          open={!!responseLetterTarget}
+          onClose={() => setResponseLetterTarget(null)}
+          onStatusUpdate={handleResolutionStatusUpdate}
+        />
       </div>
     </MainLayout>
   );
