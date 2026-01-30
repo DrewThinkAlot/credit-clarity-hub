@@ -3,16 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Report, Discrepancy, Letter, UploadedFile, AnalysisResult, GenerateLetterResult, Profile } from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-
-// Helper to convert File to base64
-async function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
-  });
-}
+import { parsePdfText } from "@/lib/pdf-parser";
 
 // Reports hooks
 export function useReports() {
@@ -271,26 +262,29 @@ export function useCreateReport() {
         })
         .eq("id", report.id);
 
-      // Convert PDFs to base64 for server-side parsing
-      const base64Files: Record<string, string> = {};
+      // Parse PDFs client-side (avoids server timeouts with large files)
+      console.log("Parsing PDFs client-side...");
+      const extractedTexts: Record<string, string> = {};
       
       for (const uploadedFile of files) {
         if (uploadedFile.bureau === "unknown") continue;
         
         try {
-          console.log(`Converting ${uploadedFile.bureau} PDF to base64...`);
-          const base64 = await fileToBase64(uploadedFile.file);
-          base64Files[uploadedFile.bureau] = base64;
+          console.log(`Parsing ${uploadedFile.bureau} PDF...`);
+          const text = await parsePdfText(uploadedFile.file);
+          extractedTexts[uploadedFile.bureau] = text;
+          console.log(`Extracted ${text.length} chars from ${uploadedFile.bureau}`);
         } catch (e) {
-          console.error(`Error converting ${uploadedFile.bureau} PDF:`, e);
+          console.error(`Error parsing ${uploadedFile.bureau} PDF:`, e);
+          extractedTexts[uploadedFile.bureau] = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
         }
       }
 
-      // Call the analyze-report edge function with base64 files
+      // Call the analyze-report edge function with pre-extracted text
       const response = await supabase.functions.invoke("analyze-report", {
         body: {
           reportId: report.id,
-          files: base64Files,
+          texts: extractedTexts,
         },
       });
 
