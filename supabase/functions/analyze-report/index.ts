@@ -1,15 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as pdfjsLib from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
-
-// PDF.js tries to load a worker by default; workers are not available in this runtime.
-// We force worker-less mode and provide a workerSrc to satisfy internal checks.
-// (The workerSrc is not actually fetched when disableWorker=true, but PDF.js still requires it.)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(pdfjsLib as any).GlobalWorkerOptions = (pdfjsLib as any).GlobalWorkerOptions || {};
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(pdfjsLib as any).GlobalWorkerOptions.workerSrc =
-  "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,232 +8,11 @@ const corsHeaders = {
 
 interface AnalysisRequest {
   reportId: string;
-  files: {
+  texts: {
     experian?: string;
     equifax?: string;
     transunion?: string;
   };
-}
-
-// Clean extracted text to improve AI analysis quality
-function cleanCreditReportText(rawText: string): string {
-  let text = rawText;
-  
-  // Normalize whitespace while preserving some structure
-  text = text.replace(/\s+/g, " ");
-  
-  // Add line breaks before common credit report section headers
-  const sectionHeaders = [
-    /(?=Account\s+(?:Name|Number|Status|Type))/gi,
-    /(?=Payment\s+History)/gi,
-    /(?=Balance\s+Information)/gi,
-    /(?=Credit\s+Limit)/gi,
-    /(?=Date\s+Opened)/gi,
-    /(?=Last\s+(?:Payment|Activity))/gi,
-    /(?=Account\s+Details)/gi,
-    /(?=CREDIT\s+(?:ACCOUNTS|CARDS|HISTORY))/gi,
-    /(?=COLLECTIONS)/gi,
-    /(?=PUBLIC\s+RECORDS)/gi,
-    /(?=INQUIRIES)/gi,
-  ];
-  
-  for (const pattern of sectionHeaders) {
-    text = text.replace(pattern, "\n");
-  }
-  
-  // Preserve delinquency status visibility
-  text = text.replace(/(\d+\s+days?\s+(?:late|past due|delinquent))/gi, "\n$1");
-  
-  // Remove common footer/header noise
-  text = text.replace(/Page \d+ of \d+/gi, "");
-  text = text.replace(/000000001-DISC/g, "");
-  text = text.replace(/TransUnion Interactive/gi, "TransUnion");
-  text = text.replace(/Experian Consumer Services/gi, "Experian");
-  
-  // Highlight collection accounts
-  text = text.replace(/(Collection|Charge[\s-]?off|Charged Off)/gi, "\n[NEGATIVE] $1");
-  
-  // Clean up multiple newlines
-  text = text.replace(/\n+/g, "\n");
-  
-  return text.trim();
-}
-
-// Extract text using PDF.js library (handles FlateDecode compression)
-async function extractTextWithPDFJS(buffer: Uint8Array): Promise<string> {
-  console.log("Attempting PDF.js extraction...");
-  
-  try {
-    const loadingTask = pdfjsLib.getDocument({
-      data: buffer,
-      // Edge runtime: run without worker
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      disableWorker: true as any,
-      useSystemFonts: true,
-      disableFontFace: true,
-    } as any);
-    
-    const pdf = await loadingTask.promise;
-    console.log(`PDF loaded successfully, pages: ${pdf.numPages}`);
-    
-    let fullText = "";
-    const maxPages = Math.min(pdf.numPages, 50); // Limit to first 50 pages
-    
-    for (let i = 1; i <= maxPages; i++) {
-      try {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        
-        // Join text items with spaces, preserving some structure
-        const pageText = textContent.items
-          .map((item: any) => {
-            const str = item.str || "";
-            // Add newline for items that appear to be on different lines
-            if (item.hasEOL) return str + "\n";
-            return str;
-          })
-          .join(" ");
-        
-        fullText += pageText + "\n\n";
-      } catch (pageError) {
-        console.log(`Error extracting page ${i}:`, pageError);
-        continue;
-      }
-    }
-    
-    console.log(`PDF.js extracted ${fullText.length} characters from ${maxPages} pages`);
-    return fullText;
-  } catch (error) {
-    console.error("PDF.js extraction error:", error);
-    throw error;
-  }
-}
-
-// Fallback: Basic regex-based extraction for older/simpler PDFs
-function extractTextFromPDFBufferFallback(buffer: Uint8Array): string {
-  console.log("Using fallback regex extraction...");
-  
-  const decoder = new TextDecoder("utf-8", { fatal: false });
-  let text = decoder.decode(buffer);
-  
-  const streamMatches = text.match(/stream\s*([\s\S]*?)\s*endstream/g) || [];
-  const extractedTexts: string[] = [];
-  
-  for (const match of streamMatches) {
-    const content = match.replace(/stream\s*/, "").replace(/\s*endstream/, "");
-    const textMatches = content.match(/\(([^)]+)\)/g) || [];
-    for (const textMatch of textMatches) {
-      const cleanText = textMatch.slice(1, -1);
-      if (cleanText.length > 1 && /[a-zA-Z0-9]/.test(cleanText)) {
-        extractedTexts.push(cleanText);
-      }
-    }
-  }
-  
-  const literalMatches = text.match(/\/T\s*\(([^)]+)\)/g) || [];
-  for (const match of literalMatches) {
-    const cleanText = match.replace(/\/T\s*\(/, "").replace(/\)$/, "");
-    if (cleanText.length > 1) {
-      extractedTexts.push(cleanText);
-    }
-  }
-  
-  const btMatches = text.match(/BT\s*([\s\S]*?)\s*ET/g) || [];
-  for (const match of btMatches) {
-    const tjMatches = match.match(/\[([^\]]+)\]\s*TJ/g) || [];
-    for (const tj of tjMatches) {
-      const parts = tj.match(/\(([^)]+)\)/g) || [];
-      for (const part of parts) {
-        const cleanText = part.slice(1, -1);
-        if (cleanText.length > 0 && /[a-zA-Z0-9]/.test(cleanText)) {
-          extractedTexts.push(cleanText);
-        }
-      }
-    }
-  }
-  
-  let result = extractedTexts.join(" ").replace(/\s+/g, " ").trim();
-  
-  if (result.length < 100) {
-    const asciiText = Array.from(buffer)
-      .filter(b => (b >= 32 && b <= 126) || b === 10 || b === 13)
-      .map(b => String.fromCharCode(b))
-      .join("");
-    
-    const keywords = ["account", "balance", "payment", "collection", "experian", "equifax", "transunion", "credit", "inquiry", "late", "charge-off", "delinquent"];
-    const lines = asciiText.split(/[\n\r]+/);
-    const relevantLines: string[] = [];
-    
-    for (const line of lines) {
-      const lowerLine = line.toLowerCase();
-      if (keywords.some(k => lowerLine.includes(k)) && line.trim().length > 5) {
-        relevantLines.push(line.trim());
-      }
-    }
-    
-    if (relevantLines.length > 0) {
-      result = relevantLines.join("\n");
-    }
-  }
-  
-  console.log(`Fallback extracted ${result.length} characters`);
-  return result;
-}
-
-async function extractTextFromBase64PDF(base64Data: string): Promise<string> {
-  try {
-    // Remove data URL prefix if present
-    const base64Clean = base64Data.replace(/^data:application\/pdf;base64,/, "");
-    
-    // Decode base64 to Uint8Array
-    const binaryString = atob(base64Clean);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    
-    let extractedText = "";
-    
-    // Try PDF.js first (handles modern compressed PDFs)
-    try {
-      extractedText = await extractTextWithPDFJS(bytes);
-      
-      // Check if we got meaningful content
-      if (extractedText.length > 200) {
-        const cleanedText = cleanCreditReportText(extractedText);
-        console.log(`PDF.js extraction successful: ${cleanedText.length} chars after cleaning`);
-        
-        // Truncate to avoid token limits (increased to 30000)
-        if (cleanedText.length > 30000) {
-          return cleanedText.substring(0, 30000) + "\n[... content truncated for analysis ...]";
-        }
-        return cleanedText;
-      }
-      
-      console.log("PDF.js extraction returned minimal content, trying fallback...");
-    } catch (pdfJsError) {
-      console.log("PDF.js parsing failed, using fallback:", pdfJsError);
-    }
-    
-    // Fallback to regex-based extraction
-    extractedText = extractTextFromPDFBufferFallback(bytes);
-    
-    if (extractedText.length > 100) {
-      const cleanedText = cleanCreditReportText(extractedText);
-      
-      if (cleanedText.length > 30000) {
-        return cleanedText.substring(0, 30000) + "\n[... content truncated for analysis ...]";
-      }
-      return cleanedText;
-    }
-    
-    console.log("Both extraction methods returned minimal content");
-    return "[PDF content could not be fully extracted - file may be image-based or protected. Please ensure you're uploading a text-based PDF credit report.]";
-    
-  } catch (error) {
-    console.error("PDF extraction error:", error);
-    throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
 }
 
 serve(async (req) => {
@@ -276,7 +45,7 @@ serve(async (req) => {
       throw new Error("Unauthorized");
     }
 
-    const { reportId, files }: AnalysisRequest = await req.json();
+    const { reportId, texts }: AnalysisRequest = await req.json();
 
     if (!reportId) {
       throw new Error("Report ID is required");
@@ -288,54 +57,27 @@ serve(async (req) => {
       .eq("id", reportId)
       .eq("user_id", user.id);
 
-    const fileContents: Record<string, string> = {};
+    // Build bureau data from pre-extracted text (parsed client-side)
+    const bureauData: string[] = [];
     
-    console.log("Parsing uploaded PDFs with enhanced extraction...");
-    
-    if (files.experian) {
-      try {
-        fileContents.experian = await extractTextFromBase64PDF(files.experian);
-        console.log(`Parsed Experian PDF: ${fileContents.experian.length} chars`);
-        // Log first 500 chars for debugging
-        console.log(`Experian preview: ${fileContents.experian.substring(0, 500)}...`);
-      } catch (e) {
-        console.error("Failed to parse Experian PDF:", e);
-        fileContents.experian = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
-      }
+    if (texts.experian && !texts.experian.startsWith("[Error")) {
+      console.log(`Received Experian text: ${texts.experian.length} chars`);
+      bureauData.push(`EXPERIAN REPORT:\n${texts.experian}`);
     }
-    
-    if (files.equifax) {
-      try {
-        fileContents.equifax = await extractTextFromBase64PDF(files.equifax);
-        console.log(`Parsed Equifax PDF: ${fileContents.equifax.length} chars`);
-        console.log(`Equifax preview: ${fileContents.equifax.substring(0, 500)}...`);
-      } catch (e) {
-        console.error("Failed to parse Equifax PDF:", e);
-        fileContents.equifax = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
-      }
+    if (texts.equifax && !texts.equifax.startsWith("[Error")) {
+      console.log(`Received Equifax text: ${texts.equifax.length} chars`);
+      bureauData.push(`EQUIFAX REPORT:\n${texts.equifax}`);
     }
-    
-    if (files.transunion) {
-      try {
-        fileContents.transunion = await extractTextFromBase64PDF(files.transunion);
-        console.log(`Parsed TransUnion PDF: ${fileContents.transunion.length} chars`);
-        console.log(`TransUnion preview: ${fileContents.transunion.substring(0, 500)}...`);
-      } catch (e) {
-        console.error("Failed to parse TransUnion PDF:", e);
-        fileContents.transunion = `[Error parsing PDF: ${e instanceof Error ? e.message : "Unknown error"}]`;
-      }
+    if (texts.transunion && !texts.transunion.startsWith("[Error")) {
+      console.log(`Received TransUnion text: ${texts.transunion.length} chars`);
+      bureauData.push(`TRANSUNION REPORT:\n${texts.transunion}`);
     }
 
-    const bureauData = [];
-    if (fileContents.experian && !fileContents.experian.startsWith("[Error")) {
-      bureauData.push(`EXPERIAN REPORT:\n${fileContents.experian}`);
+    if (bureauData.length === 0) {
+      throw new Error("No valid credit report data provided. Please ensure you're uploading readable PDF credit reports.");
     }
-    if (fileContents.equifax && !fileContents.equifax.startsWith("[Error")) {
-      bureauData.push(`EQUIFAX REPORT:\n${fileContents.equifax}`);
-    }
-    if (fileContents.transunion && !fileContents.transunion.startsWith("[Error")) {
-      bureauData.push(`TRANSUNION REPORT:\n${fileContents.transunion}`);
-    }
+
+    console.log(`Processing ${bureauData.length} bureau report(s), total data length: ${bureauData.join("").length} chars`);
 
     const systemPrompt = `ROLE & EXPERTISE
 You are an expert credit repair analyst with 15+ years of experience in FCRA compliance, Metro 2 data furnishing standards, and consumer credit law. You have successfully helped thousands of consumers improve their credit scores by identifying inaccurate, incomplete, and unverifiable information.
@@ -416,12 +158,6 @@ Response format:
     }
   ]
 }`;
-
-    if (bureauData.length === 0) {
-      throw new Error("No valid credit report data could be extracted. Please ensure you're uploading readable PDF credit reports.");
-    }
-
-    console.log(`Processing ${bureauData.length} bureau report(s), total data length: ${bureauData.join("").length} chars`);
 
     const userPrompt = `Analyze the following credit report data and identify all discrepancies and opportunities. Respond with JSON only:\n\n${bureauData.join("\n\n---\n\n")}`;
 
