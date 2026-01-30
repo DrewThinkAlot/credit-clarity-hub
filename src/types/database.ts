@@ -1,3 +1,33 @@
+// AI Analysis response structure for type safety
+export interface AIAnalysisData {
+  summary: {
+    total_debt: number;
+    credit_score_estimate?: number;
+  };
+  discrepancies: Array<{
+    account_name: string;
+    account_number_partial?: string;
+    bureau_data: {
+      experian: string;
+      equifax: string;
+      transunion: string;
+    };
+    discrepancy_type: "dispute" | "pay-for-delete" | "validation";
+    severity: "low" | "medium" | "high";
+    success_probability: number;
+    amount?: number;
+    recommended_action: string;
+    violation_type?: string;
+    fcra_section?: string;
+    priority_rank?: number;
+  }>;
+  action_plan: Array<{
+    type: "dispute" | "pay_delete" | "goodwill" | "validation";
+    priority: "high" | "medium" | "low";
+    description: string;
+  }>;
+}
+
 export interface Report {
   id: string;
   user_id: string;
@@ -8,7 +38,7 @@ export interface Report {
   experian_file_path: string | null;
   equifax_file_path: string | null;
   transunion_file_path: string | null;
-  raw_analysis: any;
+  raw_analysis: AIAnalysisData | Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
